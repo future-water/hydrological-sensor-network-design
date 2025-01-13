@@ -196,3 +196,143 @@ def plot_sensor_network(flowlines_gdf_with_rmse, centroids, save_path=None):
         plt.savefig(save_path, bbox_inches='tight', dpi=600)
     
     plt.show()
+
+def plot_sensor_network_expansion(
+    flowlines_gdf,
+    df_cleaned,
+    sensor_locations_dict,
+    sensor_labels=None,
+    save_path=None,
+    figsize=(10, 8),
+    dpi=900
+):
+    """
+    Plot sensor network with multiple configurations.
+    
+    Parameters:
+    -----------
+    flowlines_gdf : GeoDataFrame
+        GeoDataFrame containing flowline geometries.
+    df_cleaned : DataFrame
+        Cleaned streamflow data.
+    sensor_locations_dict : dict
+        Dictionary with sensor counts as keys and sensor location arrays as values.
+    sensor_labels : dict, optional
+        Dictionary mapping sensor counts to labels.
+    save_path : str, optional
+        Path to save the figure.
+    figsize : tuple, optional
+        Figure size (width, height).
+    dpi : int, optional
+        Figure resolution.
+    """
+    # Ensure df_cleaned columns are integers
+    df_cleaned.columns = df_cleaned.columns.astype(int)
+    
+    # Set up projection
+    proj = ccrs.LambertConformal(
+        central_latitude=33,
+        central_longitude=-96,
+        standard_parallels=(33.0, 45.0)
+    )
+    
+    # Create figure
+    fig, ax = plt.subplots(
+        figsize=figsize,
+        subplot_kw={'projection': proj},
+        dpi=dpi
+    )
+    
+    # Reproject flowlines to plotting CRS
+    if flowlines_gdf.crs.is_geographic:
+        flowlines_gdf = flowlines_gdf.to_crs(proj.proj4_params)
+    
+    # Plot flowlines
+    lines = LineCollection(
+        [np.array(geometry.xy).T for geometry in flowlines_gdf.geometry],
+        linewidths=0.05,
+        alpha=1,
+        color='black',
+        zorder=1
+    )
+    ax.add_collection(lines)
+    
+    # Style settings for different configurations
+    sensor_counts = sorted(sensor_locations_dict.keys())
+    styles = {
+        'colors': ['k', 'green', 'darkorange', 'darkviolet'],
+        'markers': ['o', 's', 'D', '^'],
+        'sizes': [10, 10, 10, 15],
+        'alphas': [0.9, 1, 1, 0.5]
+    }
+    
+    # Generate default labels if not provided
+    if sensor_labels is None:
+        base_count = sensor_counts[0]
+        sensor_labels = {
+            count: f'{count} sensors ({int(count / base_count * 100)}%)'
+            for count in sensor_counts
+        }
+    
+    # Track plotted points to avoid overlap
+    previous_points = set()
+    
+    # Plot each sensor configuration
+    for i, n_sensors in enumerate(sensor_counts):
+        selected_sensors = sensor_locations_dict[n_sensors]
+        
+        # Filter flowlines to sensor locations
+        selected_sensors_gdf = flowlines_gdf[
+            flowlines_gdf['COMID'].isin(df_cleaned.columns[selected_sensors].values)
+        ].copy()
+        
+        # Reproject to a suitable projected CRS for centroid calculation
+        selected_sensors_gdf = selected_sensors_gdf.to_crs("EPSG:5070") 
+        selected_sensors_gdf['centroid'] = selected_sensors_gdf.geometry.centroid
+        
+        # Reproject centroids back to the plotting CRS
+        centroids_gdf = gpd.GeoDataFrame(
+            selected_sensors_gdf,
+            geometry='centroid',
+            crs=selected_sensors_gdf.crs
+        ).to_crs(proj.proj4_params)
+        
+        # Identify new points
+        current_points = set(centroids_gdf.geometry)
+        new_points = current_points - previous_points
+        previous_points.update(current_points)
+        
+        # Create GeoDataFrame for new points
+        new_points_gdf = gpd.GeoDataFrame(
+            geometry=list(new_points),
+            crs=centroids_gdf.crs
+        )
+        
+        # Plot sensors
+        ax.scatter(
+            new_points_gdf.geometry.x,
+            new_points_gdf.geometry.y,
+            color=styles['colors'][i % len(styles['colors'])],
+            s=styles['sizes'][i % len(styles['sizes'])],
+            marker=styles['markers'][i % len(styles['markers'])],
+            alpha=styles['alphas'][i % len(styles['alphas'])],
+            edgecolor='white',  
+            linewidth=0.5, 
+            label=sensor_labels[n_sensors],
+            zorder=2
+        )
+    
+    # Set map extent
+    ax.set_extent([-106.65, -93.0, 25.0, 36.5], crs=ccrs.PlateCarree())
+    ax.spines['geo'].set_visible(False)
+    
+    # Add legend
+    ax.add_feature(feature.BORDERS, linestyle='-', alpha=.2)
+    ax.add_feature(feature.STATES, linestyle=':', alpha=.2)
+    ax.legend(frameon=False, loc='best', fontsize=16)
+    
+    # Save the figure if a path is provided
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=dpi)
+    
+    return fig, ax

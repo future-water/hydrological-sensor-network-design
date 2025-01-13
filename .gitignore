@@ -1,5 +1,15 @@
-# Data files
+# Data files and directories
 data/dailyflow_v3_*.csv
+data/
+tx_gulf_flowlines/
+*.csv
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx
 
 # Python
 __pycache__/
@@ -42,6 +52,11 @@ venv.bak/
 *.swp
 *.swo
 .DS_Store
+
+# Output files
+*.png
+*.jpg
+*.pdf
 
 # Logs
 *.log 
