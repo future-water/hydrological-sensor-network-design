@@ -1,10 +1,3 @@
-# Data files
-data/dailyflow_v3_*.csv
-data/*.grib
-data/*.idx
-data/
-tx_gulf_flowlines/
-NRI_GDB_CensusTracts/
 *.gdb
 *.csv
 *.shp
@@ -16,7 +9,23 @@ NRI_GDB_CensusTracts/
 *.sbx
 *.xml
 *.docx
-*.csv
+
+data/*
+
+!data/gadm41_BGD_shp/
+!data/gadm41_BGD_shp/**/*
+!data/gadm41_BRA_shp/
+!data/gadm41_BRA_shp/**/*
+!data/gage_12_shpaefile/
+!data/gage_12_shpaefile/**/*
+!data/gage_12.csv
+
+# Specific data files to ignore
+data/dailyflow_v3_*.csv
+data/*.grib
+data/*.idx
+tx_gulf_flowlines/
+NRI_GDB_CensusTracts/
 
 # Python
 __pycache__/
