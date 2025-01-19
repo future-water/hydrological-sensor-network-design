@@ -1,7 +1,11 @@
-# Data files and directories
+# Data files
 data/dailyflow_v3_*.csv
+data/*.grib
+data/*.idx
 data/
 tx_gulf_flowlines/
+NRI_GDB_CensusTracts/
+*.gdb
 *.csv
 *.shp
 *.shx
@@ -10,6 +14,9 @@ tx_gulf_flowlines/
 *.cpg
 *.sbn
 *.sbx
+*.xml
+*.docx
+*.csv
 
 # Python
 __pycache__/
@@ -52,11 +59,6 @@ venv.bak/
 *.swp
 *.swo
 .DS_Store
-
-# Output files
-*.png
-*.jpg
-*.pdf
 
 # Logs
 *.log 

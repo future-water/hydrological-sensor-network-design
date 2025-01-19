@@ -1,6 +1,7 @@
 # Standard library imports
 import numpy as np
 import pandas as pd
+import xarray as xr  
 
 # Geospatial imports
 import geopandas as gpd
@@ -11,6 +12,7 @@ import cartopy.feature as feature
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
+from matplotlib.colors import LogNorm
 
 # Scientific computing imports
 from scipy.linalg import qr
@@ -204,7 +206,7 @@ def plot_sensor_network_expansion(
     sensor_labels=None,
     save_path=None,
     figsize=(10, 8),
-    dpi=900
+    dpi=300
 ):
     """
     Plot sensor network with multiple configurations.
@@ -336,3 +338,289 @@ def plot_sensor_network_expansion(
         plt.savefig(save_path, bbox_inches='tight', dpi=dpi)
     
     return fig, ax
+
+
+def calculate_cost_index(flowlines_with_mean_risk, df_cleaned):
+    """
+    Calculate cost index based on flood risk scores.
+    
+    Parameters:
+    -----------
+    flowlines_with_mean_risk : GeoDataFrame
+        GeoDataFrame containing flowlines with risk scores
+    df_cleaned : DataFrame
+        Cleaned streamflow data with COMID columns
+        
+    Returns:
+    --------
+    numpy.ndarray
+        Array of cost indices corresponding to each COMID in df_cleaned
+    """
+    # Create mapping of COMID to flood risk
+    comid_to_mean_rfld_afreq = dict(
+        zip(flowlines_with_mean_risk['COMID'], 
+            flowlines_with_mean_risk['RFLD_RISKS'])
+    )
+    
+    # Get cost index for each COMID in df_cleaned
+    comids = [int(comid) for comid in df_cleaned.columns]
+    cost_index = np.array([
+        comid_to_mean_rfld_afreq.get(str(comid), 1e-10) 
+        for comid in comids
+    ])
+    
+    # Replace NaN values with small number
+    cost_index = np.where(np.isnan(cost_index), 1e-10, cost_index)
+    
+    return cost_index
+
+def plot_flood_risk_map(
+    gdb_path,
+    flowlines_gdf,
+    df_cleaned,
+    save_path=None,
+    figsize=(4, 3),
+    dpi=300
+):
+    """
+    Plot flood risk map with census tract data and calculate cost index.
+    
+    Parameters:
+    -----------
+    gdb_path : str
+        Path to the NRI GDB file containing census tract data
+    flowlines_gdf : GeoDataFrame
+        GeoDataFrame containing flowline geometries
+    df_cleaned : DataFrame
+        Cleaned streamflow data with COMID columns
+    save_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    dpi : int, optional
+        Figure resolution
+        
+    Returns:
+    --------
+    tuple
+        (figure, axis, flowlines_with_risk_df, cost_index)
+        - flowlines_with_risk_df contains the flowlines with normalized risk scores
+        - cost_index is an array of flood risk scores for each COMID in df_cleaned
+    """
+    # Load and prepare census tract data
+    gdf = gpd.read_file(gdb_path, layer='NRI_CensusTracts')
+    flowlines_gdf = flowlines_gdf.copy()
+    flowlines_gdf['COMID'] = flowlines_gdf['COMID'].astype(str)
+    
+    # Setup projection
+    proj = ccrs.LambertConformal(
+        central_latitude=33,
+        central_longitude=-96,
+        standard_parallels=(33.0, 45.0)
+    )
+    
+    # Create figure
+    fig, ax = plt.subplots(
+        figsize=figsize,
+        subplot_kw={'projection': proj},
+        dpi=dpi
+    )
+    fig.patch.set_alpha(0)
+    
+    # Set map extent
+    ax.set_extent([-106.65, -93.0, 25.0, 36.5], crs=ccrs.PlateCarree())
+    
+    # Project and plot risk data
+    gdf = gdf.to_crs(proj.proj4_params)
+    gdf.plot(
+        column='RFLD_RISKS',
+        cmap='Reds',
+        ax=ax,
+        linewidth=0.
+    )
+    
+    # Add map features
+    ax.add_feature(feature.BORDERS, linestyle='-', alpha=0.2)
+    ax.add_feature(feature.STATES, linestyle=':', alpha=0.2)
+    
+    # Add colorbar
+    sm = plt.cm.ScalarMappable(
+        cmap='Reds',
+        norm=plt.Normalize(
+            vmin=gdf['RFLD_RISKS'].min(),
+            vmax=gdf['RFLD_RISKS'].max()
+        )
+    )
+    sm.set_array([])
+    
+    cbar = fig.colorbar(
+        sm,
+        ax=ax,
+        orientation='vertical',
+        shrink=1,
+        pad=0.03
+    )
+    cbar.set_label('Flood Risk Index')
+    
+    # Calculate flowline risk scores
+    gdf = gdf.to_crs(flowlines_gdf.crs)
+    flowlines_with_risk = gpd.sjoin(
+        flowlines_gdf,
+        gdf[['RFLD_RISKS', 'geometry']],
+        how="left",
+        predicate='intersects'
+    )
+    
+    # Calculate mean risk per flowline
+    flowlines_with_mean_risk = flowlines_with_risk.groupby('COMID').agg({
+        'RFLD_RISKS': 'mean',
+        'geometry': 'first'
+    }).reset_index()
+    
+    flowlines_with_mean_risk = gpd.GeoDataFrame(
+        flowlines_with_mean_risk,
+        geometry='geometry',
+        crs=flowlines_gdf.crs
+    )
+    
+    # Normalize risk scores
+    min_val = flowlines_with_mean_risk['RFLD_RISKS'].min()
+    max_val = flowlines_with_mean_risk['RFLD_RISKS'].max()
+    flowlines_with_mean_risk['Normalized_RFLD_RISKS'] = (
+        (flowlines_with_mean_risk['RFLD_RISKS'] - min_val) /
+        (max_val - min_val)
+    )
+    
+    # Calculate cost index
+    cost_index = calculate_cost_index(flowlines_with_mean_risk, df_cleaned)
+    
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=dpi)
+    
+    return fig, ax, flowlines_with_mean_risk, cost_index 
+
+def plot_correlations_bar(correlations, p_values, significance_threshold=0.05, figsize=(12, 6), dpi=300):
+    """
+    Create a bar chart of correlations with significance highlighting.
+    """
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    
+    # Create bar plot
+    bars = ax.bar(np.arange(len(correlations)), correlations)
+    
+    # Color the bars based on significance
+    for i, (bar, p_val) in enumerate(zip(bars, p_values)):
+        bar.set_color('dodgerblue' if p_val < significance_threshold else 'lightgray')
+    
+    # Add zero reference line
+    ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
+    
+    # Add labels
+    # ax.set_xlabel('Variables')
+    ax.set_ylabel('Spearman correlation')
+    
+    # Set x-axis ticks and labels
+    ax.set_xticks(np.arange(len(correlations)))
+    ax.set_xticklabels(correlations.index, rotation=90, ha='right', fontsize = 8)
+    
+    # Add grid for better readability
+    ax.grid(True, linestyle='--', alpha=0.3)
+    
+    # Remove the figure box by hiding the spines
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    
+    plt.tight_layout()
+    
+    return fig
+
+def process_region(glofas_data, boundary, region_extent, sensor_number=50):
+    # Clip GLOFAS data to region boundary
+    glofas_data = glofas_data.sel(
+        latitude=slice(region_extent[3], region_extent[2]),  # Latitudes in descending order
+        longitude=slice(region_extent[0], region_extent[1])
+    )
+    
+    glofas_data_clipped = glofas_data.rio.clip(
+    boundary.geometry,
+    boundary.crs,
+    drop=True
+    )
+
+    # Align cropped data with original grid
+    glofas_data_clipped = glofas_data_clipped.interp(
+        latitude=glofas_data.latitude,
+        longitude=glofas_data.longitude
+    )
+    
+    # Mask NaN values in 'dis24'
+    glofas_data_clipped_masked = glofas_data_clipped.where(
+        ~xr.ufuncs.isnan(glofas_data_clipped['dis24']), drop=True
+    )
+    
+    # Create latitude-longitude pairs
+    lat_lon = xr.DataArray(
+        [
+            f"({lat}, {lon})"
+            for lat in glofas_data_clipped.latitude.values
+            for lon in glofas_data_clipped.longitude.values
+        ],
+        dims="lat_lon",
+        name="lat_lon"
+    )
+    
+    # Reshape data for QR decomposition
+    dis24_matrix = glofas_data_clipped['dis24'].stack(lat_lon=("latitude", "longitude"))
+    dis24_matrix = dis24_matrix.drop_vars(['lat_lon', 'latitude', 'longitude'], errors='ignore')
+    dis24_matrix = dis24_matrix.assign_coords(lat_lon=lat_lon).dropna(dim='lat_lon', how='all')
+    valid_lat_lon = dis24_matrix.lat_lon.values
+    matrix = dis24_matrix.values
+    
+    # Sensor placement
+    sensor_location = sensor_placement_qr(matrix, sensor_number)
+    selected = valid_lat_lon[sensor_location]
+    selected_points = [eval(point) for point in selected]
+    
+    # Calculate mean discharge data
+    mean_data = glofas_data_clipped['dis24'].mean(dim='time')
+    mean_data = mean_data.assign_attrs(**glofas_data_clipped['dis24'].attrs)
+    
+    return mean_data, selected_points
+
+def plot_map_glofas(plot_data, selected_points, region_name, cbar_label="Maximum discharge (cms)"):
+    selected_latitudes = [point[0] for point in selected_points]
+    selected_longitudes = [point[1] for point in selected_points]
+    
+    fig, ax = plt.subplots(
+        1, 1, figsize=(10, 6), subplot_kw={"projection": ccrs.PlateCarree()}
+    )
+    
+    # Plot the mean data
+    im = ax.pcolormesh(
+        plot_data.longitude,
+        plot_data.latitude,
+        plot_data,
+        cmap="Blues",
+        norm=LogNorm(vmin=1, vmax=1e4),
+        transform=ccrs.PlateCarree()
+    )
+    
+    # Plot sensor locations
+    ax.scatter(
+        selected_longitudes, selected_latitudes,
+        color="orangered", edgecolors="black", s=30,
+        label="Sensor Locations", transform=ccrs.PlateCarree()
+    )
+    
+    # Add features
+    ax.coastlines()
+    ax.add_feature(feature.BORDERS, linestyle=':')
+    ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+    ax.legend(frameon=False, loc="upper right")
+    
+    # Add color bar
+    cbar = plt.colorbar(im, ax=ax, fraction=0.04, pad=0.05)
+    cbar.set_label(cbar_label, fontsize=12)
+    
+    plt.show()
