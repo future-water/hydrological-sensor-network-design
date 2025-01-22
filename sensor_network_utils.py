@@ -179,7 +179,8 @@ def plot_sensor_network(flowlines_gdf_with_rmse, centroids, save_path=None):
     # Plot sensors
     scatter_props = {
         'usgs': {'color': 'k', 'label': 'USGS gauges'},
-        'opt': {'color': 'green', 'label': 'Reconfigured sensors'}
+        'opt': {'color': 'green', 'label': 'Reconfigured sensors'},
+        'risk': {'color': 'dodgerblue', 'label': 'Risk-weighted sensors'}
     }
     
     for name, gdf in centroids.items():
