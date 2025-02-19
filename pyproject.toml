@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hydrosensornet"
+dynamic = ["version"]
+description = "A package for hydrological sensor network analysis and optimization"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "xarray",
+    "geopandas",
+    "cartopy",
+    "matplotlib",
+    "scipy",
+    "scikit-learn",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["hydrosensornet"]
+
+[tool.setuptools_scm]
+write_to = "src/hydrosensornet/_version.py" 

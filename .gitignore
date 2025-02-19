@@ -27,6 +27,10 @@ data/*.idx
 tx_gulf_flowlines/
 NRI_GDB_CensusTracts/
 
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
 # Python
 __pycache__/
 *.py[cod]
