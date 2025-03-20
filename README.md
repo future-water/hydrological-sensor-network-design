@@ -1,6 +1,8 @@
 # hydrological-sensor-network-design
 <img src="./sensor_network.png" alt="sensor_network" width="500"/>
 
+Oh, J., & Bartos, M. (2025). Scalable, Adaptive, and Risk-Informed Design of Hydrological Sensor Networks. preprint. https://doi.org/10.21203/rs.3.rs-6038740/v1
+
 ## Features
 
 - **Sensor Network Reconfiguration**: Optimize sensor locations using QR decomposition to improve monitoring coverage
