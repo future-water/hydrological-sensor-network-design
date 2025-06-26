@@ -180,7 +180,7 @@ def plot_sensor_network(flowlines_gdf_with_rmse, centroids, save_path=None):
     scatter_props = {
         'usgs': {'color': 'k', 'label': 'USGS gauges'},
         'opt': {'color': 'green', 'label': 'Reconfigured sensors'},
-        'risk': {'color': 'dodgerblue', 'label': 'Risk-weighted sensors'}
+        'risk': {'color': 'darkorange', 'label': 'Risk-weighted sensors'}
     }
     
     for name, gdf in centroids.items():
@@ -538,6 +538,169 @@ def plot_flood_risk_map(
         plt.savefig(save_path, bbox_inches='tight', dpi=dpi)
     
     return fig, ax, flowlines_with_mean_risk, cost_index 
+
+def plot_flood_risk_map_clipped(
+    gdb_path,
+    flowlines_gdf,
+    df_cleaned,
+    huc2_boundary_gdf=None,
+    save_path=None,
+    figsize=(4, 3),
+    dpi=300
+):
+    """
+    Plot flood risk map with census tract data clipped to HUC2 Texas boundary.
+    """
+    import geopandas as gpd
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    import cartopy.feature as feature
+    import numpy as np
+    
+    # Load and prepare census tract data
+    gdf = gpd.read_file(gdb_path, layer='NRI_CensusTracts')
+    flowlines_gdf = flowlines_gdf.copy()
+    flowlines_gdf['COMID'] = flowlines_gdf['COMID'].astype(str)
+    
+    # Setup projection
+    proj = ccrs.LambertConformal(
+        central_latitude=33,
+        central_longitude=-96,
+        standard_parallels=(33.0, 45.0)
+    )
+    
+    # Create figure
+    fig, ax = plt.subplots(
+        figsize=figsize,
+        subplot_kw={'projection': proj},
+        dpi=dpi
+    )
+    fig.patch.set_alpha(0)
+    
+    # Clip data to HUC2 boundary if provided
+    if huc2_boundary_gdf is not None:
+        huc2_boundary = huc2_boundary_gdf.to_crs(gdf.crs)
+    
+        if huc2_boundary.geometry.isna().any() or huc2_boundary.is_empty.any():
+            print("Warning: Invalid geometries found in HUC2 boundary")
+            huc2_boundary = huc2_boundary[~huc2_boundary.geometry.isna() & ~huc2_boundary.is_empty]
+        
+        gdf_clipped = gpd.clip(gdf, huc2_boundary)
+        flowlines_clipped = gpd.clip(flowlines_gdf, huc2_boundary.to_crs(flowlines_gdf.crs))
+        
+        huc2_wgs84 = huc2_boundary.to_crs('EPSG:4326')
+        bounds = huc2_wgs84.total_bounds
+        
+        if np.any(np.isnan(bounds)) or np.any(np.isinf(bounds)):
+            print("Invalid bounds detected, using default Texas extent")
+            ax.set_extent([-106.65, -93.0, 25.0, 36.5], crs=ccrs.PlateCarree())
+        else:
+            # Add small buffer to bounds (in degrees)
+            buffer = 0.1  # degrees
+            extent = [
+                bounds[0] - buffer, bounds[2] + buffer,  # lon_min, lon_max
+                bounds[1] - buffer, bounds[3] + buffer   # lat_min, lat_max
+            ]
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
+        
+        gdf_to_plot = gdf_clipped
+        flowlines_to_use = flowlines_clipped
+        
+    else:
+        ax.set_extent([-106.65, -93.0, 25.0, 36.5], crs=ccrs.PlateCarree())
+        gdf_to_plot = gdf
+        flowlines_to_use = flowlines_gdf
+        huc2_boundary = None
+
+    gdf_to_plot = gdf_to_plot.to_crs(proj.proj4_params)
+    
+
+    if len(gdf_to_plot) > 0:
+        valid_risks = gdf_to_plot['RFLD_RISKS'].dropna()
+        if len(valid_risks) > 0:
+            gdf_to_plot.plot(
+                column='RFLD_RISKS',
+                cmap='Reds',
+                ax=ax,
+                linewidth=0.,
+                missing_kwds={'color': 'lightgray'} 
+            )
+            
+            sm = plt.cm.ScalarMappable(
+                cmap='Reds',
+                norm=plt.Normalize(vmin=valid_risks.min(), vmax=valid_risks.max())
+            )
+            sm.set_array([])
+            
+            cbar = fig.colorbar(
+                sm,
+                ax=ax,
+                orientation='vertical',
+                shrink=1,
+                pad=0.03
+            )
+            cbar.set_label('Flood Risk Index')
+        else:
+            gdf_to_plot.plot(ax=ax, color='lightgray', linewidth=0.)
+    else:
+        print("No census tract data to plot after clipping")
+    
+    # Add HUC2 boundary outline if provided
+    if huc2_boundary_gdf is not None and huc2_boundary is not None:
+        huc2_proj = huc2_boundary.to_crs(proj.proj4_params)
+        huc2_proj.boundary.plot(ax=ax, color='black', linewidth=0.5, alpha=0.8)
+
+    ax.add_feature(feature.BORDERS, linestyle='-', alpha=0.2)
+    ax.add_feature(feature.STATES, linestyle=':', alpha=0.2)
+    
+    if len(gdf_to_plot) > 0 and len(flowlines_to_use) > 0:
+        print("Calculating flowline risk scores...")
+        gdf_for_analysis = gdf_to_plot.to_crs(flowlines_to_use.crs)
+        flowlines_with_risk = gpd.sjoin(
+            flowlines_to_use,
+            gdf_for_analysis[['RFLD_RISKS', 'geometry']],
+            how="left",
+            predicate='intersects'
+        )
+        
+        flowlines_with_mean_risk = flowlines_with_risk.groupby('COMID').agg({
+            'RFLD_RISKS': 'mean',
+            'geometry': 'first'
+        }).reset_index()
+        
+        flowlines_with_mean_risk = gpd.GeoDataFrame(
+            flowlines_with_mean_risk,
+            geometry='geometry',
+            crs=flowlines_to_use.crs
+        )
+        
+        if len(flowlines_with_mean_risk) > 0 and not flowlines_with_mean_risk['RFLD_RISKS'].isna().all():
+            min_val = flowlines_with_mean_risk['RFLD_RISKS'].min()
+            max_val = flowlines_with_mean_risk['RFLD_RISKS'].max()
+            if min_val != max_val:  # Avoid division by zero
+                flowlines_with_mean_risk['Normalized_RFLD_RISKS'] = (
+                    (flowlines_with_mean_risk['RFLD_RISKS'] - min_val) /
+                    (max_val - min_val)
+                )
+            else:
+                flowlines_with_mean_risk['Normalized_RFLD_RISKS'] = 0.5
+        else:
+            flowlines_with_mean_risk['Normalized_RFLD_RISKS'] = 0
+    else:
+        print("No data available for flowline risk calculation")
+        flowlines_with_mean_risk = gpd.GeoDataFrame(columns=['COMID', 'RFLD_RISKS', 'Normalized_RFLD_RISKS', 'geometry'])
+    
+    try:
+        cost_index = calculate_cost_index(flowlines_with_mean_risk, df_cleaned)
+    except Exception as e:
+        print(f"Error calculating cost index: {e}")
+        cost_index = None
+    
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=dpi)
+        print(f"Figure saved to {save_path}")
+    
+    return fig, ax, flowlines_with_mean_risk, cost_index
 
 def plot_correlations_bar(correlations, p_values, significance_threshold=0.05, figsize=(12, 6), dpi=300):
     """
