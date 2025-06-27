@@ -24,6 +24,7 @@ data/*
 data/dailyflow_v3_*.csv
 data/*.grib
 data/*.idx
+data/*.tif
 tx_gulf_flowlines/
 NRI_GDB_CensusTracts/
 
